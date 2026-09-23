@@ -1,5 +1,0 @@
-Machine learning is a branch of artificial intelligence.
-Machine learning allows computers to learn patterns from data.
-Supervised learning uses labeled data to train machine learning models.
-Unsupervised learning works with unlabeled data.
-Machine learning models can be used for classification and prediction.
