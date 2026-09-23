@@ -1,0 +1,6 @@
+Gradient descent is an optimization algorithm used to minimize a loss function.
+Gradient descent is commonly used when training machine learning models.
+The algorithm updates model parameters step by step.
+The learning rate controls the size of each update.
+A smaller learning rate can make training slower.
+A larger learning rate can make training unstable.
