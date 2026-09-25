@@ -1,0 +1,5 @@
+Artificial Intelligence (AI) is the simulation of human intelligence processes by computer systems. These processes include learning (the acquisition of information and rules for using the information), reasoning (using rules to reach approximate or definite conclusions), and self-correction. Particular applications of AI include expert systems, speech recognition, and machine vision.
+
+Modern AI systems are categorized into narrow AI and general AI. Narrow AI, also known as weak AI, is designed and trained for a particular task, such as virtual personal assistants, autonomous vehicles, or recommendation engines. Artificial General Intelligence (AGI), or strong AI, is hypothetical artificial intelligence that possesses the ability to understand, learn, and apply knowledge across a wide variety of tasks at a human level.
+
+AI relies on foundational techniques including search algorithms, knowledge representation, logic, probabilistic reasoning, and machine learning. Deep learning, an advanced subset of machine learning using multi-layer neural networks, has powered recent breakthroughs in generative AI, computer vision, and natural language processing.

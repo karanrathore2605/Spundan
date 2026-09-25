@@ -1,0 +1,9 @@
+Retrieval-Augmented Generation (RAG) is an architectural approach that optimizes the output of large language models (LLMs) by referencing an external knowledge base outside of its training data before generating a response.
+
+In a typical RAG system:
+1. Document Ingestion: Text documents are loaded and cleaned.
+2. Chunking: Large documents are broken down into semantically coherent, manageable pieces called chunks.
+3. Embedding Generation: Each chunk is mapped into high-dimensional vector space using an embedding model.
+4. Vector Storage: Vector representations and chunk metadata are indexed in a vector store like FAISS.
+5. Retrieval: When a user query arrives, it is embedded, and nearest neighbor search retrieves the top-k most relevant chunks.
+6. Augmentation & Generation: The retrieved chunks serve as contextual ground truth for an LLM to generate precise, grounded answers with citations.

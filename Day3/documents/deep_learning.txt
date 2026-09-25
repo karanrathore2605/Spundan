@@ -1,4 +1,5 @@
-Python is a high-level programming language.
-Python is widely used for web development, automation, data science, and artificial intelligence.
-Python has simple and readable syntax.
-Python supports object-oriented and functional programming.
+Deep learning is a subset of machine learning.
+Neural networks are commonly used in deep learning.
+Neural networks contain layers of interconnected neurons.
+Neural networks can use gradient descent to update their weights.
+Deep learning is widely used for image recognition and natural language processing.
