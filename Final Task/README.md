@@ -103,11 +103,13 @@ flowchart TD
 ## 📁 Project Structure
 
 ```text
-Final Task/
-├── app.py                      # Main Streamlit web application
-├── run_api.py                  # Entrypoint to run FastAPI backend server
-├── requirements.txt            # Project dependencies
-├── README.md                   # Complete documentation & architecture
+spundan/
+├── requirements.txt            # Root dependencies (Streamlit Cloud & local)
+│
+└── Final Task/
+    ├── app.py                  # Main Streamlit web application
+    ├── run_api.py              # Entrypoint to run FastAPI backend server
+    ├── README.md               # Complete documentation & architecture
 ├── .env.example                # Template for environment configuration
 ├── .env                        # Local secrets (ignored by git)
 ├── .gitignore                  # Git ignore rules
