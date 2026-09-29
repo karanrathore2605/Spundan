@@ -1,0 +1,21 @@
+# Environment variables
+.env
+
+# Python bytecode & cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# Vector storage cache
+storage/*.faiss
+storage/*.pkl
+
+# OS files
+.DS_Store
+Thumbs.db
