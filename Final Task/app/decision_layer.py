@@ -29,6 +29,40 @@ DOCUMENT_REFERENCE = re.compile(
     re.IGNORECASE,
 )
 
+# Explicit references demanding facts specifically from the uploaded document
+EXPLICIT_DOC_PATTERN = re.compile(
+    r"\b(according to the|in the (?:uploaded )?(?:document|resume|file|pdf|text)|from the (?:uploaded )?(?:document|resume|file|pdf|text)|stated in the|mentioned in the|as per the (?:uploaded )?(?:document|resume|file|pdf|text)|what does the (?:document|resume|file|pdf) say)\b",
+    re.IGNORECASE,
+)
+
+
+class RouteDecision(tuple):
+    """
+    Backwards-compatible 2-tuple (route, expression) with rich routing metadata:
+    - route: "CALCULATOR", "RAG", "RAG_AND_CALCULATOR", "DIRECT_LLM"
+    - expression: Optional math expression string
+    - reason: Explanatory reasoning for the chosen route
+    - tool: "calculator", "document_search", "document_search + calculator", "llm"
+    - is_explicit_doc: True if user specifically requested document-grounded facts
+    """
+    def __new__(cls, route: str, expression: Optional[str] = None, reason: str = "", tool: str = "llm", is_explicit_doc: bool = False):
+        obj = super().__new__(cls, (route, expression))
+        obj.route = route
+        obj.expression = expression
+        obj.reason = reason
+        obj.tool = tool
+        obj.is_explicit_doc = is_explicit_doc
+        return obj
+
+    def to_dict(self) -> dict:
+        return {
+            "tool": self.tool,
+            "route": self.route,
+            "reason": self.reason,
+            "expression": self.expression,
+            "is_explicit_document_query": self.is_explicit_doc,
+        }
+
 
 @dataclass
 class AgentResult:
@@ -42,93 +76,192 @@ class AgentResult:
     sources: List[str] = field(default_factory=list)
     retrieval_results: List[RetrievalResult] = field(default_factory=list)
     error: Optional[str] = None
+    reason: Optional[str] = None
 
 
 class DecisionLayer:
     """
-    LLM Decision Layer that analyzes user intent and dynamically orchestrates
-    RAG, Calculator Tool, and Direct LLM response generation.
+    Intelligent Decision Layer that analyzes user intent and dynamically orchestrates
+    RAG (document search), Calculator Tool, and Direct LLM response generation.
+    Distinguishes between document-specific queries, general knowledge questions, and calculations.
     """
 
     def __init__(self, rag_pipeline: RAGPipeline):
         self.rag_pipeline = rag_pipeline
 
-    def decide_route(self, query: str, has_documents: bool) -> Tuple[str, Optional[str]]:
+    @staticmethod
+    def _log_routing(query: str, decision: RouteDecision) -> None:
+        """Log routing decisions in structured standard format."""
+        display_route = (
+            "DOCUMENT_SEARCH" if decision.route == "RAG"
+            else ("LLM" if decision.route == "DIRECT_LLM"
+            else decision.route)
+        )
+        logger.info(
+            "\nQuery: %s\nRoute: %s\nReason: %s",
+            query,
+            display_route,
+            decision.reason or "No reason provided",
+        )
+
+    def decide_route(
+        self,
+        query: str,
+        has_documents: bool,
+        doc_name: Optional[str] = None,
+    ) -> RouteDecision:
         """
         Determine the execution route for the query.
-        Returns (route_name, optional_extracted_math_expression).
+        Returns a RouteDecision (unpackable as (route, expression)).
         Routes:
-        - 'CALCULATOR': Standalone math expression
-        - 'RAG_AND_CALCULATOR': Document-grounded math problem
-        - 'RAG': Document information / explanation / summary
-        - 'DIRECT_LLM': General conversation / knowledge
+        - 'CALCULATOR': Standalone math expression (Tool: calculator)
+        - 'RAG_AND_CALCULATOR': Document-grounded math problem (Tool: document_search + calculator)
+        - 'RAG': Document information / explanation / summary (Tool: document_search)
+        - 'DIRECT_LLM': General conversation / knowledge (Tool: llm)
         """
         cleaned_query = query.strip()
+        lower_q = cleaned_query.lower()
+
+        if doc_name is None and has_documents:
+            vs = getattr(self.rag_pipeline.retriever, "vector_store", None)
+            if vs and vs.chunks:
+                doc_name = vs.chunks[0].source
 
         # 1. Fast Path: Pure Math Expression (e.g. "25 * 8", "what is 100 / 4")
         if PURE_MATH_PATTERN.match(cleaned_query):
-            # Extract the raw math expression
             expr = re.sub(r"(?i)^(what\s+is\s+|calculate\s+|solve\s+|compute\s+)", "", cleaned_query)
             expr = expr.rstrip("?").strip()
             if any(char.isdigit() for char in expr):
-                logger.info("Fast-path route: CALCULATOR for '%s'", expr)
-                return "CALCULATOR", expr
+                decision = RouteDecision(
+                    route="CALCULATOR",
+                    expression=expr,
+                    reason="Mathematical expression",
+                    tool="calculator",
+                    is_explicit_doc=False,
+                )
+                self._log_routing(cleaned_query, decision)
+                return decision
 
-        # 2. Fast Path: User explicitly asks for LLM / external knowledge
-        lower_q = cleaned_query.lower()
+        # 2. Fast Path: User explicitly asks for general LLM / external knowledge
         if any(cue in lower_q for cue in ["using llm", "use llm", "external source", "use external", "general knowledge", "without document"]):
-            logger.info("Explicit route: DIRECT_LLM based on user instruction in query")
-            return "DIRECT_LLM", None
+            decision = RouteDecision(
+                route="DIRECT_LLM",
+                expression=None,
+                reason="User explicitly requested general knowledge / LLM response",
+                tool="llm",
+                is_explicit_doc=False,
+            )
+            self._log_routing(cleaned_query, decision)
+            return decision
 
-        # 3. Rule Check: Document-dependent math (contains math/percentage and document keywords or numerical questions when document is loaded)
+        # 3. Rule Check: Document-dependent math
         has_math_cues = bool(HAS_MATH_OR_PERCENT.search(cleaned_query))
-        has_doc_cues = bool(DOCUMENT_REFERENCE.search(cleaned_query))
+        has_explicit_doc = bool(EXPLICIT_DOC_PATTERN.search(cleaned_query))
 
-        if has_documents and has_math_cues and (has_doc_cues or "how many" in cleaned_query.lower() or "%" in cleaned_query):
-            logger.info("Heuristic route: RAG_AND_CALCULATOR")
-            return "RAG_AND_CALCULATOR", None
+        if has_documents and has_math_cues and (has_explicit_doc or ("how many" in lower_q and ("in the" in lower_q or "resume" in lower_q or "document" in lower_q))):
+            decision = RouteDecision(
+                route="RAG_AND_CALCULATOR",
+                expression=None,
+                reason="Document-grounded mathematical calculation",
+                tool="document_search + calculator",
+                is_explicit_doc=True,
+            )
+            self._log_routing(cleaned_query, decision)
+            return decision
 
         # 4. LLM-Based Intent Classification
-        routing_prompt = f"""You are an intelligent AI router that classifies user queries into the appropriate processing route.
+        routing_prompt = f"""You are an intelligent query router that classifies user queries into the appropriate tool.
 
-Available Routes:
-1. "CALCULATOR": The query is a direct, standalone math expression or calculation without needing document context (e.g., "25 * 8", "calculate 100 / 4").
-2. "RAG_AND_CALCULATOR": The query requires retrieving facts/numbers from the uploaded document AND performing a calculation or percentage computation (e.g., "If the document says there are 500 employees and 15% work remotely, how many employees work remotely?", "What is the total revenue minus cost according to the report?").
-3. "RAG": The query asks about the document's content, policies, explanations, summaries, or key points (e.g., "Explain this in simple words", "Give key points", "What is the leave policy?").
-4. "DIRECT_LLM": General knowledge question unrelated to any uploaded document or math (e.g., "What is Python?", "Hello!").
+Available Tools:
+1. "calculator":
+   - The query is a direct, standalone math expression or calculation (e.g., "25 * 8", "calculate 100 / 4").
+2. "document_search":
+   - The query asks about specific information, facts, qualifications, skills, experience, or projects from the uploaded document or the specific person/entity it describes (e.g., "What skills are mentioned in Krishna's resume?", "What is Krishna's experience?", "Which projects are mentioned in the uploaded resume?").
+   - OR the query explicitly references the uploaded document (e.g., "According to the uploaded document, what is RAG?", "What does the file say about leave policy?").
+3. "llm":
+   - The query asks a general knowledge, conceptual, or theoretical question that does NOT specifically request document context (e.g., "What is RAG?", "What is Python?", "Explain embeddings in simple words", "What is FAISS?").
+   - General conversation, greetings, or common questions.
+4. "document_search + calculator":
+   - The query requires retrieving facts/numbers from the uploaded document AND performing a calculation (e.g., "If the document says there are 500 employees and 15% work remotely, how many employees work remotely?").
 
-Document currently loaded: {'YES' if has_documents else 'NO'}
+CRITICAL RULES:
+- General knowledge or definition questions (like "What is RAG?", "What is Python?", "Explain embeddings in simple words", "What is FAISS?") MUST be classified as "llm", EVEN IF a document is loaded, UNLESS the user explicitly asks what the uploaded document states about it.
+- If the query specifically mentions the person or entity from the uploaded document (e.g. "Krishna" when document is "{doc_name or 'None'}"), classify as "document_search".
+
+Uploaded Document Loaded: {'YES' if has_documents else 'NO'}
+Uploaded Document Name: "{doc_name or 'None'}"
 User Query: "{cleaned_query}"
 
 Respond ONLY with a JSON object in this exact format:
-{{"route": "CALCULATOR"|"RAG"|"RAG_AND_CALCULATOR"|"DIRECT_LLM", "expression": null}}
-If route is CALCULATOR, put the math expression in "expression".
+{{
+  "tool": "calculator" | "document_search" | "llm" | "document_search + calculator",
+  "reason": "Clear 1-sentence reason for this decision",
+  "expression": null,
+  "is_explicit_document_query": false
+}}
 """
+        tool_to_route = {
+            "calculator": "CALCULATOR",
+            "document_search": "RAG",
+            "document_search + calculator": "RAG_AND_CALCULATOR",
+            "llm": "DIRECT_LLM",
+        }
+
         try:
             raw_response = generate_answer(
                 routing_prompt,
-                system_prompt="You are a strict JSON classifier. Output valid JSON only.",
+                system_prompt="You are a strict JSON query router. Return valid JSON only.",
                 temperature=0.0,
             )
-            # Parse JSON from LLM output
             json_match = re.search(r"\{.*\}", raw_response, re.DOTALL)
             if json_match:
                 parsed = json.loads(json_match.group(0))
-                route = parsed.get("route", "").upper()
+                tool = parsed.get("tool", "llm").strip().lower()
+                reason = parsed.get("reason", "")
                 expr = parsed.get("expression")
-                if route in {"CALCULATOR", "RAG", "RAG_AND_CALCULATOR", "DIRECT_LLM"}:
-                    logger.info("LLM Decision Layer selected route: %s", route)
-                    return route, expr
+                is_explicit = bool(parsed.get("is_explicit_document_query", False)) or has_explicit_doc
+
+                if tool in tool_to_route:
+                    route = tool_to_route[tool]
+                    decision = RouteDecision(
+                        route=route,
+                        expression=expr,
+                        reason=reason or ("Document-specific question" if route == "RAG" else "General knowledge question"),
+                        tool=tool,
+                        is_explicit_doc=is_explicit,
+                    )
+                    self._log_routing(cleaned_query, decision)
+                    return decision
         except Exception as exc:
-            logger.warning("LLM router classification error: %s. Falling back to heuristics.", exc)
+            logger.warning("LLM router classification error: %s. Using heuristic router.", exc)
 
         # 5. Fallback Heuristics
-        if has_documents:
-            if has_math_cues:
-                return "RAG_AND_CALCULATOR", None
-            return "RAG", None
+        doc_entity_match = False
+        if doc_name:
+            stem = Path(doc_name).stem.lower().replace("_", " ").replace("-", " ")
+            stem_words = [w for w in stem.split() if len(w) > 2 and w not in ["resume", "offline", "document", "file", "pdf", "text"]]
+            if any(w in lower_q for w in stem_words):
+                doc_entity_match = True
 
-        return "DIRECT_LLM", None
+        if has_documents and (has_explicit_doc or doc_entity_match):
+            decision = RouteDecision(
+                route="RAG",
+                expression=None,
+                reason="Document-specific question",
+                tool="document_search",
+                is_explicit_doc=has_explicit_doc,
+            )
+        else:
+            decision = RouteDecision(
+                route="DIRECT_LLM",
+                expression=None,
+                reason="General knowledge question",
+                tool="llm",
+                is_explicit_doc=False,
+            )
+
+        self._log_routing(cleaned_query, decision)
+        return decision
 
     def execute(self, query: str) -> AgentResult:
         """Execute the full agent workflow based on decided route."""
@@ -142,9 +275,16 @@ If route is CALCULATOR, put the math expression in "expression".
             )
 
         has_docs = not self.rag_pipeline.retriever.vector_store.is_empty()
-        route, expression = self.decide_route(cleaned, has_documents=has_docs)
+        doc_name = (
+            self.rag_pipeline.retriever.vector_store.chunks[0].source
+            if has_docs and self.rag_pipeline.retriever.vector_store.chunks
+            else None
+        )
+        decision = self.decide_route(cleaned, has_documents=has_docs, doc_name=doc_name)
+        route = decision.route
+        expression = decision.expression
 
-        logger.info("Executing Query: '%s' | Route: %s", cleaned, route)
+        logger.info("Executing Query: '%s' | Route: %s | Tool: %s", cleaned, route, decision.tool)
 
         # =====================================================
         # ROUTE 1: CALCULATOR
@@ -164,6 +304,7 @@ If route is CALCULATOR, put the math expression in "expression".
                     tool_used="calculator",
                     expression=calc_expr,
                     calculation_result=str(result_val),
+                    reason=decision.reason,
                 )
             except Exception as exc:
                 return AgentResult(
@@ -173,6 +314,7 @@ If route is CALCULATOR, put the math expression in "expression".
                     tool_used="calculator",
                     expression=calc_expr,
                     error=str(exc),
+                    reason=decision.reason,
                 )
 
         # =====================================================
@@ -185,6 +327,7 @@ If route is CALCULATOR, put the math expression in "expression".
                     route="RAG + Calculator",
                     answer="Please upload and process a document first to answer document-based calculation questions.",
                     tool_used="None",
+                    reason=decision.reason,
                 )
 
             # Step 1: Retrieve relevant context from document
@@ -304,9 +447,79 @@ Do not hallucinate. Ground your answer in the retrieved context.
                     route="RAG",
                     answer="Please upload and process a document first so I can answer questions about it.",
                     tool_used="document_search",
+                    reason=decision.reason,
                 )
 
+            retrieval_results = self.rag_pipeline.search_documents(cleaned)
+
+            # Case A: Zero chunks found by retriever
+            if not retrieval_results:
+                if decision.is_explicit_doc:
+                    return AgentResult(
+                        success=False,
+                        route="RAG",
+                        answer="I could not find relevant information in the uploaded document to answer this question.",
+                        tool_used="document_search",
+                        sources=[],
+                        reason=decision.reason,
+                    )
+                else:
+                    logger.info("Retriever found no relevant chunks for '%s'. Falling back to general LLM.", cleaned)
+                    try:
+                        direct_ans = generate_answer(cleaned, temperature=0.3)
+                        return AgentResult(
+                            success=True,
+                            route="Direct LLM",
+                            answer=direct_ans,
+                            tool_used="llm",
+                            sources=[],
+                            reason="Fallback to LLM because document context did not contain answer",
+                        )
+                    except Exception:
+                        pass
+
+            # Case B: Chunks retrieved -> synthesize grounded answer
             rag_resp: RAGResponse = self.rag_pipeline.answer_question(cleaned)
+
+            # Check if answer indicates missing information in document
+            negative_phrases = [
+                "could not find",
+                "not found in the uploaded document",
+                "not mentioned in the context",
+                "does not contain",
+                "cannot be determined from the context",
+                "no information",
+            ]
+            ans_lower = rag_resp.answer.lower()
+            not_in_document = any(p in ans_lower for p in negative_phrases)
+
+            if not_in_document:
+                if decision.is_explicit_doc:
+                    # Explicit document question -> state clearly that document lacks this fact
+                    return AgentResult(
+                        success=True,
+                        route="RAG",
+                        answer=rag_resp.answer,
+                        tool_used="document_search",
+                        sources=rag_resp.sources,
+                        retrieval_results=rag_resp.retrieval_results,
+                        reason=decision.reason,
+                    )
+                else:
+                    # General question that was routed to RAG but missing from document -> fallback to LLM
+                    logger.info("Document context does not contain answer for '%s'. Falling back to general LLM.", cleaned)
+                    try:
+                        direct_ans = generate_answer(cleaned, temperature=0.3)
+                        return AgentResult(
+                            success=True,
+                            route="Direct LLM",
+                            answer=direct_ans,
+                            tool_used="llm",
+                            sources=[],
+                            reason="Fallback to LLM because document context did not contain answer",
+                        )
+                    except Exception:
+                        pass
 
             return AgentResult(
                 success=rag_resp.success,
@@ -315,6 +528,7 @@ Do not hallucinate. Ground your answer in the retrieved context.
                 tool_used="document_search",
                 sources=rag_resp.sources,
                 retrieval_results=rag_resp.retrieval_results,
+                reason=decision.reason,
             )
 
         # =====================================================
@@ -328,6 +542,7 @@ Do not hallucinate. Ground your answer in the retrieved context.
                 answer=direct_ans,
                 tool_used="llm",
                 sources=[],
+                reason=decision.reason,
             )
         except Exception as exc:
             return AgentResult(
@@ -336,4 +551,5 @@ Do not hallucinate. Ground your answer in the retrieved context.
                 answer=f"LLM service error: {exc}",
                 tool_used="llm",
                 error=str(exc),
+                reason=decision.reason,
             )
