@@ -21,7 +21,7 @@ def test_root_endpoint():
     data = resp.json()
     assert "AI Document Assistant API is running" in data["message"]
     assert "docs_url" in data
-    assert "Qwen" in data["embedding_model"]
+    assert "all-MiniLM-L6-v2" in data["embedding_model"]
 
 
 def test_health_endpoint():
@@ -37,7 +37,7 @@ def test_models_endpoint():
     resp = client.get("/api/models")
     assert resp.status_code == 200
     data = resp.json()
-    assert "Qwen" in data["embedding"]["requested_model"]
+    assert "all-MiniLM-L6-v2" in data["embedding"]["requested_model"]
     assert data["chunking"]["strategy"] == "RecursiveCharacterTextSplitter"
 
 

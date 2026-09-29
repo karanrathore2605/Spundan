@@ -29,7 +29,7 @@ from app.config import (
 )
 from app.decision_layer import AgentResult, DecisionLayer
 from app.document_loader import Document, DocumentLoader
-from app.embeddings import get_active_model_name, is_fallback_active, get_fallback_reason
+from app.embeddings import get_active_model_name
 from app.rag_pipeline import RAGPipeline
 from app.retriever import HybridRetriever
 from app.vector_store import VectorStore
@@ -282,9 +282,6 @@ with st.sidebar:
                     vector_store.build_from_chunks(chunks)
                     vector_store.save()
 
-                    if is_fallback_active():
-                        st.info("Embedding model initialization selected fallback embedding model ('all-MiniLM-L6-v2') for cloud performance.")
-
                     st.session_state.history = []  # fresh search history for new doc
                     st.rerun()
         except Exception as exc:
@@ -307,8 +304,6 @@ with st.sidebar:
         st.write(f"**File:** {doc_display_name}")
         st.write(f"**Chunks:** {vector_store.total_chunks}")
         st.write(f"**Embedding Model:** `{get_active_model_name()}`")
-        if is_fallback_active():
-            st.caption("⚡ Cloud Fallback active (all-MiniLM-L6-v2)")
 
         if st.button("Clear Document", use_container_width=True):
             vector_store.clear()

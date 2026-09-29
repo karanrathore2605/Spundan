@@ -20,7 +20,7 @@ Standard LLMs frequently hallucinate facts or produce arithmetic errors when cal
 
 - **Multi-Format Document Ingestion**: Supports `.pdf` (via `pypdf`), `.txt` (with multi-encoding fallback), and `.docx` (via `python-docx`).
 - **Recursive Character Text Chunking**: Hierarchical recursive text splitting (`["\n\n", "\n", ". ", " ", ""]`) using `RecursiveCharacterTextSplitter` with configurable chunk size (800 chars) and overlap (150 chars) to prevent orphaned heading fragments and preserve semantic continuity.
-- **Dense Vector Search with Qwen 3-Embedding-8B**: State-of-the-art dense embeddings using `Qwen/Qwen3-Embedding-8B` with automatic query instruction prompting (`prompt_name="query"`), device optimization (CUDA/CPU), external API endpoint support (`EMBEDDING_API_URL`), and resilient memory-aware fallback. Indexed in `faiss-cpu` (`IndexFlatIP`).
+- **Dense Vector Search with all-MiniLM-L6-v2**: High-speed dense embeddings using `all-MiniLM-L6-v2` (384-dimensional normalized vectors) with CPU and CUDA auto-selection. Indexed in `faiss-cpu` (`IndexFlatIP`).
 - **Hybrid Retrieval System**: Combines semantic cosine similarity (70% weight) and IDF-weighted token frequency matching (30% weight) to maximize recall on both conceptual and exact keyword queries.
 - **LLM Decision Layer**: Dynamically determines the required toolchain:
   - `CALCULATOR`: Direct arithmetic calculations.
@@ -42,7 +42,7 @@ flowchart TD
     subgraph Ingestion["Document Ingestion Pipeline"]
         Doc[Uploaded Document PDF / TXT / DOCX] --> Loader[Document Loader]
         Loader --> Chunker[Recursive Character Text Splitter]
-        Chunker --> Embeddings[Qwen 3-Embedding-8B Dense Vectors]
+        Chunker --> Embeddings[all-MiniLM-L6-v2 Dense Vectors]
         Chunker --> IDF[IDF Token Table]
         Embeddings --> FAISS[(FAISS Vector Store IndexFlatIP)]
     end
@@ -90,7 +90,7 @@ flowchart TD
 | **FastAPI 0.110+ & Uvicorn** | High-performance backend REST API |
 | **Streamlit 1.64+** | Interactive web application framework and UI |
 | **Groq API** | High-performance LLM inference (`openai/gpt-oss-20b`, `llama-3.3-70b-versatile`) |
-| **Qwen 3-Embedding-8B** | State-of-the-art dense semantic embedding model (`Qwen/Qwen3-Embedding-8B`) |
+| **all-MiniLM-L6-v2** | Fast, lightweight dense semantic embedding model (`all-MiniLM-L6-v2`, 384 dimensions) |
 | **LangChain Text Splitters** | `RecursiveCharacterTextSplitter` for hierarchical document chunking |
 | **FAISS CPU** | High-speed vector index and cosine similarity search |
 | **NumPy** | Array manipulations and vector normalization |
@@ -120,7 +120,7 @@ Final Task/
 │   ├── calculator_tool.py      # Safe AST-based mathematical evaluator
 │   ├── document_loader.py      # Universal loader for PDF, TXT, and DOCX
 │   ├── chunker.py              # Recursive Character Text Splitter (langchain-text-splitters)
-│   ├── embeddings.py           # Qwen 3-Embedding-8B integration with query prompting & fallback
+│   ├── embeddings.py           # all-MiniLM-L6-v2 integration with dynamic dimension detection
 │   ├── vector_store.py         # FAISS vector store with IDF table & persistence
 │   ├── retriever.py            # Hybrid retriever (Dense + Sparse keyword)
 │   ├── rag_pipeline.py         # Grounded RAG execution & prompt construction
@@ -227,8 +227,8 @@ python -m uvicorn app.api:app --host 0.0.0.0 --port 8000 --reload
 | Method | Endpoint | Description |
 | :--- | :--- | :--- |
 | `GET` | `/api/health` | System health, vector store state & embedding model info |
-| `GET` | `/api/models` | Diagnostic parameters for Qwen 3-Embedding-8B & LLM |
-| `POST` | `/api/embed` | Generate dense vector embeddings using Qwen 3-Embedding-8B |
+| `GET` | `/api/models` | Diagnostic parameters for all-MiniLM-L6-v2 & LLM |
+| `POST` | `/api/embed` | Generate dense vector embeddings using all-MiniLM-L6-v2 |
 | `POST` | `/api/split` | Preview text chunking via Recursive Character Text Splitter |
 | `POST` | `/api/documents/upload` | Upload `.pdf`, `.txt`, `.docx` to chunk & index in FAISS |
 | `POST` | `/api/documents/index-text` | Directly index raw text into vector store |

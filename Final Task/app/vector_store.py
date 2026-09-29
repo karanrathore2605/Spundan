@@ -236,19 +236,33 @@ class VectorStore:
                 except Exception:
                     pass
 
-            # Model dimension compatibility check
+            # Model and dimension compatibility check (ensures only active model vectors are loaded)
             current_dim = get_model_dimension()
+            active_model = get_active_model_name()
+            needs_rebuild = False
+
             if self.index.d != current_dim:
                 logger.warning(
-                    "Saved FAISS index dimension (%d) does not match active embedding model dimension (%d). "
-                    "Rebuilding index with current model...",
+                    "Saved FAISS index dimension (%d) does not match active embedding model dimension (%d).",
                     self.index.d, current_dim,
                 )
+                needs_rebuild = True
+            elif self.model_name and self.model_name != active_model:
+                logger.warning(
+                    "Saved FAISS index model '%s' does not match active embedding model '%s'. Rebuilding cleanly...",
+                    self.model_name, active_model,
+                )
+                needs_rebuild = True
+
+            if needs_rebuild:
                 if self.chunks:
+                    logger.info("Rebuilding vector store from %d chunks using '%s'...", len(self.chunks), active_model)
                     self.build_from_chunks(self.chunks)
                     self.save(target_dir)
+                else:
+                    self.clear()
 
-            logger.info("Loaded FAISS index with %d chunks (dim=%d, model='%s') from %s", self.total_chunks, self.index.d if self.index else 0, self.model_name, target_dir)
+            logger.info("Loaded FAISS index with %d chunks (dim=%d, model='%s') from %s", self.total_chunks, self.index.d if self.index else 0, self.model_name or active_model, target_dir)
             return True
         except Exception as exc:
             logger.warning("Failed to load saved index: %s", exc)

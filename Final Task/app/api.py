@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 app = FastAPI(
     title="AI Document Assistant API",
     description=(
-        "REST API backend for AI Document Assistant featuring Qwen 3-Embedding-8B, "
+        "REST API backend for AI Document Assistant featuring all-MiniLM-L6-v2, "
         "Recursive Character Text Splitter, Hybrid RAG Retrieval, and AST Calculator."
     ),
     version="1.0.0",
@@ -84,7 +84,7 @@ class HealthResponse(BaseModel):
 
 class EmbedRequest(BaseModel):
     texts: List[str] = Field(..., description="List of text strings to embed")
-    is_query: bool = Field(False, description="Whether the texts are search queries (applies query prompt for Qwen)")
+    is_query: bool = Field(False, description="Whether the texts are search queries")
 
 
 class EmbedResponse(BaseModel):
@@ -215,8 +215,7 @@ def model_info():
 @app.post("/api/embed", response_model=EmbedResponse, tags=["Embeddings"])
 def generate_embeddings(req: EmbedRequest):
     """
-    Generate normalized dense vector embeddings using Qwen 3-Embedding-8B.
-    Automatically applies query instructions when is_query=True.
+    Generate normalized dense vector embeddings using all-MiniLM-L6-v2.
     """
     if not req.texts:
         raise HTTPException(status_code=400, detail="The 'texts' list cannot be empty.")
@@ -265,7 +264,7 @@ def preview_text_split(req: SplitRequest):
 async def upload_document(file: UploadFile = File(...)):
     """
     Upload a document (PDF, TXT, DOCX), split it using Recursive Character Text Splitter,
-    generate Qwen embeddings, and index into FAISS vector store.
+    generate all-MiniLM-L6-v2 embeddings, and index into FAISS vector store.
     """
     vs, _, _, _ = get_shared_pipeline()
     filename = file.filename or "uploaded_file"
@@ -284,7 +283,7 @@ async def upload_document(file: UploadFile = File(...)):
             "filename": filename,
             "total_chunks": len(chunks),
             "char_count": len(doc.content),
-            "message": f"Successfully indexed '{filename}' with {len(chunks)} chunks using Recursive Splitter and Qwen embeddings.",
+            "message": f"Successfully indexed '{filename}' with {len(chunks)} chunks using Recursive Splitter and all-MiniLM-L6-v2 embeddings.",
         }
     except Exception as exc:
         logger.error("Error uploading document %s: %s", filename, exc)
@@ -343,7 +342,7 @@ def clear_documents():
 @app.post("/api/search", response_model=SearchResponse, tags=["Retrieval"])
 def search_documents(req: SearchRequest):
     """
-    Perform hybrid retrieval (dense semantic Qwen embeddings + sparse keyword scoring)
+    Perform hybrid retrieval (dense semantic all-MiniLM-L6-v2 embeddings + sparse keyword scoring)
     over the indexed document chunks.
     """
     _, retriever, _, _ = get_shared_pipeline()
