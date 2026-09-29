@@ -11,6 +11,11 @@ if hasattr(sys.stdout, "reconfigure"):
 
 import streamlit as st
 
+# Ensure project directory is in sys.path for robust import resolution
+PROJECT_ROOT = Path(__file__).resolve().parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from app.chunker import TextChunker
 from app.config import (
     DOCUMENTS_DIR,
