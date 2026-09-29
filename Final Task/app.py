@@ -1,8 +1,10 @@
 import os
 import sys
-import time
+import logging
 from pathlib import Path
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 # Ensure UTF-8 output on Windows
 if hasattr(sys.stdout, "reconfigure"):
@@ -27,6 +29,7 @@ from app.config import (
 )
 from app.decision_layer import AgentResult, DecisionLayer
 from app.document_loader import Document, DocumentLoader
+from app.embeddings import get_active_model_name, is_fallback_active, get_fallback_reason
 from app.rag_pipeline import RAGPipeline
 from app.retriever import HybridRetriever
 from app.vector_store import VectorStore
@@ -254,23 +257,38 @@ with st.sidebar:
         try:
             if uploaded_file is not None:
                 file_bytes = uploaded_file.read()
+                logger.info("[1] Document uploaded: '%s' (%d bytes)", uploaded_file.name, len(file_bytes))
+                logger.info("[2] Text extraction started: '%s'", uploaded_file.name)
                 doc = DocumentLoader.load_from_bytes(file_bytes, uploaded_file.name)
+                logger.info("[3] Text extraction completed: '%s' (%d chars)", uploaded_file.name, len(doc.content))
                 st.session_state.active_doc_name = uploaded_file.name
             elif selected_sample and selected_sample != "None":
                 sample_path = DOCUMENTS_DIR / selected_sample
+                logger.info("[1] Document uploaded (sample): '%s'", selected_sample)
+                logger.info("[2] Text extraction started: '%s'", selected_sample)
                 doc = DocumentLoader.load_from_path(sample_path)
+                logger.info("[3] Text extraction completed: '%s' (%d chars)", selected_sample, len(doc.content))
                 st.session_state.active_doc_name = selected_sample
             else:
                 st.warning("Please upload a file or choose a sample document.")
 
             if doc:
                 with st.spinner("Indexing document..."):
+                    logger.info("[4] Chunking started for '%s'", doc.source)
                     chunks = TextChunker().chunk_document(doc)
+                    logger.info("[5] Number of chunks created: %d chunks", len(chunks))
+
+                    # Stages [6]-[11] execute inside build_from_chunks
                     vector_store.build_from_chunks(chunks)
                     vector_store.save()
+
+                    if is_fallback_active():
+                        st.info("Embedding model initialization selected fallback embedding model ('all-MiniLM-L6-v2') for cloud performance.")
+
                     st.session_state.history = []  # fresh search history for new doc
                     st.rerun()
         except Exception as exc:
+            logger.error("Error processing document: %s", exc, exc_info=True)
             st.error(f"Error processing document: {exc}")
 
     # Document ready status box
@@ -288,6 +306,9 @@ with st.sidebar:
         )
         st.write(f"**File:** {doc_display_name}")
         st.write(f"**Chunks:** {vector_store.total_chunks}")
+        st.write(f"**Embedding Model:** `{get_active_model_name()}`")
+        if is_fallback_active():
+            st.caption("⚡ Cloud Fallback active (all-MiniLM-L6-v2)")
 
         if st.button("Clear Document", use_container_width=True):
             vector_store.clear()

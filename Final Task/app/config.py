@@ -21,6 +21,22 @@ STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
 GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b").strip()
 
+# Hugging Face Configuration (optional token for rate limits & private repos)
+HF_TOKEN = os.getenv("HF_TOKEN", "").strip()
+
+# Streamlit secrets integration (if running inside Streamlit Cloud)
+try:
+    import streamlit as st
+    if hasattr(st, "secrets"):
+        if "HF_TOKEN" in st.secrets and not HF_TOKEN:
+            HF_TOKEN = str(st.secrets["HF_TOKEN"]).strip()
+        if "GROQ_API_KEY" in st.secrets and not GROQ_API_KEY:
+            GROQ_API_KEY = str(st.secrets["GROQ_API_KEY"]).strip()
+        if "GROQ_MODEL" in st.secrets:
+            GROQ_MODEL = str(st.secrets["GROQ_MODEL"]).strip()
+except Exception:
+    pass
+
 # Embedding & Vector Store Configuration
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "Qwen/Qwen3-Embedding-8B").strip()
 EMBEDDING_FALLBACK_MODEL = os.getenv("EMBEDDING_FALLBACK_MODEL", "all-MiniLM-L6-v2").strip()
